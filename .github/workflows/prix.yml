@@ -1,0 +1,45 @@
+name: Prix de l'HV (API Blizzard)
+
+on:
+  schedule:
+    - cron: '17 * * * *'   # toutes les heures (Blizzard publie a l'heure)
+  workflow_dispatch:        # bouton "Run workflow"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prix
+  cancel-in-progress: false
+
+jobs:
+  prix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Etat precedent (branche data)
+        run: |
+          mkdir -p out
+          if git fetch --depth 1 origin data 2>/dev/null; then
+            git show origin/data:state.json > out/state.json 2>/dev/null || rm -f out/state.json
+          fi
+
+      - name: Telecharger les hotels des ventes
+        env:
+          BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
+          BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
+          REGION: eu
+          RULESETS: PvP,PvE,RP,RPvP
+        run: python3 fetch.py
+
+      - name: Publier sur la branche data (sans historique)
+        run: |
+          cd out
+          git init -q -b data
+          git config user.name "craftmaster-prix"
+          git config user.email "actions@users.noreply.github.com"
+          git add .
+          git commit -q -m "Prix du $(date -u '+%Y-%m-%d %H:%M') UTC"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data
