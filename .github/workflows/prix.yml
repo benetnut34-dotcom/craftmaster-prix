@@ -23,8 +23,10 @@ jobs:
         run: |
           mkdir -p out
           if git fetch --depth 1 origin data 2>/dev/null; then
-            git show origin/data:state.json > out/state.json 2>/dev/null || rm -f out/state.json
+            git --work-tree=out checkout origin/data -- . 2>/dev/null || true
+            git reset -q
           fi
+          ls -la out
 
       - name: Telecharger les hotels des ventes
         env:

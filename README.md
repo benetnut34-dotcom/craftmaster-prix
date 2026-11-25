@@ -21,7 +21,7 @@ Le compagnon recopie le fichier de ton type de serveur toutes les heures. Fais `
 | `Data-RP.lua` | JdR : 119, 120, 121 |
 | `Data-RPvP.lua` | JdR-JcJ : 123, 124, 125 |
 
-Chaque fichier contient la dernière photo de chaque HV (prix unitaire le plus bas et quantité par objet) et les prix les plus bas des 14 derniers jours.
+Chaque fichier contient la dernière photo de chaque HV (prix unitaire le plus bas et quantité par objet), les prix les plus bas des 14 derniers jours, et les **ventes détectées** sur 14 jours : d'une photo à l'autre, une annonce qui disparaît alors qu'il lui restait plus de 2 h est comptée vendue (un quart seulement si des annonces nettement moins chères restent : plutôt retirée), une quantité qui baisse est un achat partiel, une annonce qui disparaît à moins de 2 h de sa fin a sans doute expiré.
 
 Adresse directe : `https://raw.githubusercontent.com/benetnut34-dotcom/craftmaster-prix/data/Data-PvP.lua`
 
