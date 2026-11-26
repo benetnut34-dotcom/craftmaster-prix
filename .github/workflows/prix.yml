@@ -1,12 +1,17 @@
 name: Prix de l'HV (API Blizzard)
 
+# Tourne sur les serveurs de GitHub : aucun PC n'a besoin d'etre allume.
+# Les declencheurs "schedule" de GitHub sont parfois retardes ou sautes quand la
+# plateforme est chargee : on en met 3 par heure. Blizzard ne publie qu'une photo
+# par heure (vers la 21e minute) ; les passages sans photo nouvelle ne publient rien.
 on:
   schedule:
-    - cron: '17 * * * *'   # toutes les heures (Blizzard publie a l'heure)
+    - cron: '12,32,52 * * * *'
   workflow_dispatch:        # bouton "Run workflow"
 
 permissions:
   contents: write
+  actions: write            # pour le keep-alive ci-dessous
 
 concurrency:
   group: prix
@@ -29,14 +34,17 @@ jobs:
           ls -la out
 
       - name: Telecharger les hotels des ventes
+        id: fetch
         env:
           BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
           BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
           REGION: eu
-          RULESETS: PvP,PvE,RP,RPvP
+          RULESETS: PvP          # serveur JcJ uniquement
+          KEEP_DAYS: 14          # fenetre glissante ; au-dela, tout est purge
         run: python3 fetch.py
 
-      - name: Publier sur la branche data (sans historique)
+      - name: Publier sur la branche data (sans historique git)
+        if: steps.fetch.outputs.changed == '1'
         run: |
           cd out
           git init -q -b data
@@ -45,3 +53,18 @@ jobs:
           git add .
           git commit -q -m "Prix du $(date -u '+%Y-%m-%d %H:%M') UTC"
           git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data
+
+      - name: Resume
+        if: always()
+        run: |
+          {
+            echo "### Prix de l'HV"
+            echo "- Publication : ${{ steps.fetch.outputs.changed == '1' && 'oui (photo nouvelle)' || 'non (rien de nouveau ou erreur)' }}"
+            ls -l out | awk 'NR>1 {printf "- %s : %d Ko\n", $9, $5/1024}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep-alive (GitHub coupe les planifications des depots inactifs apres 60 jours)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable prix.yml --repo "${{ github.repository }}" || true

@@ -1,10 +1,12 @@
 """Prix des hotels des ventes de WoW Forever pour CraftMaster.
 
-Lance toutes les heures par GitHub Actions (.github/workflows/prix.yml).
-Telecharge les hotels de chaque type de serveur depuis l'API officielle de
-Blizzard, garde les prix les plus bas des 14 derniers jours (state.json) et
-ecrit un fichier par type de serveur (Data-PvP.lua, Data-PvE.lua...) que le
-compagnon CraftMaster telecharge, sans identifiant.
+Lance plusieurs fois par heure par GitHub Actions (.github/workflows/prix.yml),
+sans qu'aucun PC ne soit allume. Telecharge les hotels du serveur JcJ (PvP)
+depuis l'API officielle de Blizzard, garde les prix les plus bas des KEEP_DAYS
+derniers jours (state.json), compte les photos recues par jour (couverture :
+pour voir les trous) et ecrit Data-PvP.lua, que le compagnon CraftMaster
+telecharge, sans identifiant. Tout ce qui est plus vieux que KEEP_DAYS, ou qui
+concerne un autre type de serveur, est purge.
 
 Identifiants : secrets du depot BLIZZARD_CLIENT_ID et BLIZZARD_CLIENT_SECRET.
 Python 3, bibliotheque standard seulement.
@@ -15,6 +17,7 @@ import gzip
 import math
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -22,9 +25,11 @@ import urllib.parse
 import urllib.request
 
 REGION = os.environ.get('REGION', 'eu').lower()
-RULESETS = [r.strip() for r in os.environ.get('RULESETS', 'PvP,PvE,RP,RPvP').split(',') if r.strip()]
+RULESETS = [r.strip() for r in os.environ.get('RULESETS', 'PvP').split(',') if r.strip()]
 OUT = os.environ.get('OUT', 'out')
-KEEP_DAYS = 14
+KEEP_DAYS = int(os.environ.get('KEEP_DAYS', '14'))
+SOURCE = 'github:' + os.environ.get('GITHUB_REPOSITORY', 'craftmaster-prix') + '@data'
+RUN_ID = os.environ.get('GITHUB_RUN_ID', 'local')
 
 # Les trois hotels (Alliance, Horde, commune) de chaque type de serveur.
 # L'API ne dit pas a quel type appartient un hotel : correspondance relevee par
@@ -208,11 +213,19 @@ def prune_sales(sales, day):
             del sales[iid]
 
 
-def lua_file(rs, houses, lows, now, sales=None, since=None):
-    """Le meme format que le compagnon PowerShell (CraftMasterData)."""
+def cov_string(cov, day):
+    """'jour:photos,jour:photos' : combien de photos de l'API ont ete recues chaque jour."""
+    return ','.join('%d:%d' % (int(d), n) for d, n in sorted(cov.items(), key=lambda kv: int(kv[0]))
+                    if int(d) > day - KEEP_DAYS)
+
+
+def lua_file(rs, houses, lows, now, sales=None, since=None, cov=None):
+    """Le meme format que le compagnon PowerShell (CraftMasterData), plus l'origine
+    (src, gen), la duree gardee (keep) et la couverture par jour (cov)."""
     day = now // 86400
     out = ['-- Prix publies par craftmaster-prix (API Blizzard). Ne pas modifier.',
-           'CraftMasterData = { v = 1, at = %d, region = "%s", ruleset = "%s", houses = {' % (now, REGION, rs)]
+           'CraftMasterData = { v = 1, at = %d, region = "%s", ruleset = "%s", keep = %d, src = "%s", gen = "%s", houses = {'
+           % (now, REGION, rs, KEEP_DAYS, SOURCE, RUN_ID)]
     for key, h in sorted(houses.items()):
         snap = ''.join('%d:%d:%d;' % (iid, e[0], e[1]) for iid, e in sorted(h['items'].items()))
         lw = []
@@ -221,6 +234,7 @@ def lua_file(rs, houses, lows, now, sales=None, since=None):
             if kept:
                 lw.append('%s=%s;' % (iid, ','.join('%d:%d' % dp for dp in kept)))
         out.append('["%s"] = { id = %d, at = %d,' % (key, h['id'], h['at']))
+        out.append('cov = "%s",' % cov_string((cov or {}).get(key, {}), day))
         out.append('items = "%s",' % snap)
         out.append('lows = "%s",' % ''.join(lw))
         out.append('sales = "%s" },' % sales_string((sales or {}).get(key, {}), (since or {}).get(key), now))
@@ -238,7 +252,8 @@ def run(fetch=fetch_house, tok=None, state_path=None):
             state = json.load(f)
     lows, snaps = state.setdefault('lows', {}), state.setdefault('snap', {})
     sales_all, since = state.setdefault('sales', {}), state.setdefault('since', {})
-    ok = 0
+    cov = state.setdefault('cov', {})
+    ok = new = 0
     for rs in RULESETS:
         for side, hid in zip(SIDES, HOUSES[rs]):
             key = '%s-%s' % (rs, side)
@@ -262,6 +277,9 @@ def run(fetch=fetch_house, tok=None, state_path=None):
                 except (OSError, ValueError, KeyError):
                     prev = None
             if prev_at != at:
+                new += 1
+                hc = cov.setdefault(key, {})
+                hc[str(at // 86400)] = hc.get(str(at // 86400), 0) + 1
                 hs = sales_all.setdefault(key, {})
                 r = track_sales(prev, prev_at, listings, at, hs)
                 since.setdefault(key, at)
@@ -277,7 +295,7 @@ def run(fetch=fetch_house, tok=None, state_path=None):
                 if d not in days or price < days[d]:
                     days[d] = price
             log('%s (hotel %d) : %d objets' % (key, hid, len(items)))
-    # les jours trop vieux
+    # purge : les jours trop vieux...
     for hs in sales_all.values():
         prune_sales(hs, day)
     for hl in lows.values():
@@ -285,18 +303,34 @@ def run(fetch=fetch_house, tok=None, state_path=None):
             hl[iid] = {d: p for d, p in hl[iid].items() if int(d) > day - KEEP_DAYS}
             if not hl[iid]:
                 del hl[iid]
+    for hc in cov.values():
+        for d in [d for d in hc if int(d) <= day - KEEP_DAYS]:
+            del hc[d]
+    # ... et tout ce qui concerne un autre type de serveur
+    active = {'%s-%s' % (rs, side): HOUSES[rs][i] for rs in RULESETS for i, side in enumerate(SIDES)}
+    for table in (lows, snaps, sales_all, since, cov):
+        for k in [k for k in table if k not in active]:
+            del table[k]
     os.makedirs(OUT, exist_ok=True)
+    for name in os.listdir(OUT):
+        prev_m = re.match(r'^prev-(\d+)\.json\.gz$', name)
+        data_m = re.match(r'^Data-(\w+)\.lua$', name)
+        stale = (prev_m and int(prev_m.group(1)) not in active.values()) or (data_m and data_m.group(1) not in RULESETS)
+        if stale:
+            os.remove(os.path.join(OUT, name))
+            log('purge : %s' % name)
     for rs in RULESETS:
         houses = {k: {'id': s['id'], 'at': s['at'], 'items': {int(i): e for i, e in s['items'].items()}}
                   for k, s in snaps.items() if k.startswith(rs + '-')}
         if houses:
             path = os.path.join(OUT, 'Data-%s.lua' % rs)
             with open(path, 'w') as f:
-                f.write(lua_file(rs, houses, lows, now, sales_all, since))
+                f.write(lua_file(rs, houses, lows, now, sales_all, since, cov))
             log('ecrit %s (%d Ko)' % (path, os.path.getsize(path) // 1024))
     with open(state_path, 'w') as f:
         json.dump(state, f, separators=(',', ':'))
-    return ok
+    log('%d photo(s) nouvelle(s), couverture : %s' % (new, {k: sum(v.values()) for k, v in cov.items()}))
+    return ok, new
 
 
 if __name__ == '__main__':
@@ -307,5 +341,9 @@ if __name__ == '__main__':
         tok = token(cid, sec)
     except urllib.error.HTTPError as e:
         sys.exit('Blizzard refuse les identifiants (HTTP %d) : verifie les secrets du depot.' % e.code)
-    n = run(tok=tok)
+    n, new = run(tok=tok)
+    # le workflow ne publie que s'il y a une photo nouvelle (Blizzard en produit une par heure)
+    if os.environ.get('GITHUB_OUTPUT'):
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write('changed=%d\n' % (1 if new else 0))
     sys.exit(0 if n else 1)
