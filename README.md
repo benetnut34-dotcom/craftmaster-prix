@@ -34,5 +34,11 @@ Les numéros d'HV par type de serveur viennent de relevés de la communauté : l
 - Si la chaîne s'arrête quand même : onglet Actions > Run workflow la relance.
 - Un « keep-alive » en fin de passage empêche GitHub de couper la planification après 60 jours d'inactivité.
 - On peut aussi le lancer à la demande (onglet Actions > Run workflow).
-- Les identifiants de l'API sont des **secrets du dépôt** (`BLIZZARD_CLIENT_ID`, `BLIZZARD_CLIENT_SECRET`). Ils ne sont visibles par personne et n'apparaissent dans aucun fichier.
+- Les identifiants de l'API sont des **secrets** (`BLIZZARD_CLIENT_ID`, `BLIZZARD_CLIENT_SECRET`), dans l'environnement `prix` limité à la branche `main` (Settings > Environments). Ils n'apparaissent dans aucun fichier. Attention : quiconque peut écrire sur une branche peut faire lire les secrets du dépôt par un workflow ; c'est pourquoi ils sont limités à `main`, qui n'accepte que des pull requests relues par le propriétaire.
 - La branche `data` est remplacée à chaque passage (pas d'historique git), avec `state.json` pour garder les 14 jours ; tout ce qui dépasse est purgé.
+
+## Contribuer
+
+- Pas de commit direct sur `main` : une branche, une **pull request**, relue par le proprietaire (`.github/CODEOWNERS`). `main` est protegee (pas de `push --force`, tests obligatoires).
+- `python3 tests/test_fetch.py` doit passer : il protege les choix du pipeline (serveur PvP seul, 14 jours, relais automatique, format lu par l'addon).
+- Si `main` avance pendant que tu travailles, le workflow **Alerte conflits** previent l'auteur de la PR (mention + etiquette `conflit`) ; la marche a suivre est dans le commentaire. Voir `CLAUDE.md` pour les consignes detaillees.

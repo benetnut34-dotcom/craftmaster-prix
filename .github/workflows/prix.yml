@@ -26,6 +26,9 @@ jobs:
   prix:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Environnement "prix" : limite a la branche main dans Settings > Environments, ses
+    # secrets ne sont lus que par du code deja relu et fusionne dans main.
+    environment: prix
     concurrency:
       group: prix
       cancel-in-progress: false

@@ -1,0 +1,6 @@
+# Tout changement doit etre relu par le proprietaire (regle "Require review from Code Owners"
+# de la protection de la branche main). Le script, le workflow et les tests sont le coeur du
+# pipeline des prix : les secrets Blizzard sont lus par ce workflow.
+*                         @benetnut34-dotcom
+/.github/                 @benetnut34-dotcom
+/fetch.py                 @benetnut34-dotcom
