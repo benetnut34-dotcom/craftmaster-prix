@@ -313,7 +313,49 @@ def cov_string(cov, day):
                     if int(d) > day - KEEP_DAYS)
 
 
-def lua_file(rs, houses, lows, now, sales=None, since=None, cov=None):
+PROF_MIN_ITEMS = 200      # une photo ne compte que si assez d'objets ont un prix habituel
+PROF_MIN_DAYS = 3         # jours de prix bas necessaires pour qu'un objet ait un prix habituel
+
+
+def market_index(items, lows_key, at):
+    """L'indice de prix du marche a l'heure d'une photo : la moyenne, sur les objets qui
+    ont un prix habituel (mediane de leurs prix bas des jours d'avant), de prix / habituel.
+    Meme definition que l'addon (Timing.lua). None si trop peu d'objets."""
+    day = at // 86400
+    tot, n = 0.0, 0
+    for iid, (price, _) in items.items():
+        days = lows_key.get(str(iid))
+        if not days or price <= 0:
+            continue
+        prev = sorted(p for d, p in days.items() if int(d) < day)
+        if len(prev) < PROF_MIN_DAYS:
+            continue
+        usual = prev[len(prev) // 2]
+        tot += max(0.2, min(3.0, price / usual))
+        n += 1
+    return (tot / n, n) if n >= PROF_MIN_ITEMS else None
+
+
+def prof_note(prof_key, idx, at):
+    """Une observation par (jour de la semaine, heure) UTC et par jour calendaire : la derniere
+    ecrase la precedente. Gardee KEEP_DAYS jours."""
+    t = time.gmtime(at)
+    wd = (t.tm_wday + 1) % 7 + 1          # 1 = dimanche, comme l'addon
+    prof_key.setdefault('%d:%d' % (wd, t.tm_hour), {})[str(at // 86400)] = round(idx, 4)
+
+
+def prof_string(prof_key, day):
+    """'jour:heure:indice(milliemes):nombre de jours;...' : la mediane des observations."""
+    out = []
+    for k, obs in sorted(prof_key.items(), key=lambda kv: tuple(int(x) for x in kv[0].split(':'))):
+        vals = sorted(v for d, v in obs.items() if int(d) > day - KEEP_DAYS)
+        if vals:
+            med = vals[len(vals) // 2] if len(vals) % 2 else (vals[len(vals) // 2 - 1] + vals[len(vals) // 2]) / 2
+            out.append('%s:%d:%d;' % (k, round(med * 1000), len(vals)))
+    return ''.join(out)
+
+
+def lua_file(rs, houses, lows, now, sales=None, since=None, cov=None, prof=None):
     """Le meme format que le compagnon PowerShell (CraftMasterData), plus l'origine
     (src, gen), la duree gardee (keep) et la couverture par jour (cov)."""
     day = now // 86400
@@ -332,6 +374,7 @@ def lua_file(rs, houses, lows, now, sales=None, since=None, cov=None):
         out.append('items = "%s",' % snap)
         out.append('lows = "%s",' % ''.join(lw))
         out.append('depth = "%s",' % h.get('depth', ''))
+        out.append('prof = "%s",' % prof_string((prof or {}).get(key, {}), day))
         out.append('sales = "%s" },' % sales_string((sales or {}).get(key, {}), (since or {}).get(key), now))
     out.append('} }')
     return '\n'.join(out) + '\n'
@@ -348,6 +391,7 @@ def run(fetch=fetch_house, tok=None, state_path=None):
     lows, snaps = state.setdefault('lows', {}), state.setdefault('snap', {})
     sales_all, since = state.setdefault('sales', {}), state.setdefault('since', {})
     cov = state.setdefault('cov', {})
+    prof = state.setdefault('prof', {})
     ok = new = 0
     for rs in RULESETS:
         for side, hid in zip(SIDES, HOUSES[rs]):
@@ -381,6 +425,9 @@ def run(fetch=fetch_house, tok=None, state_path=None):
                 hs = sales_all.setdefault(key, {})
                 r = track_sales(prev, prev_at, cur, at, hs)
                 since.setdefault(key, at)
+                mi = market_index(items, lows.get(key, {}), at)
+                if mi:
+                    prof_note(prof.setdefault(key, {}), mi[0], at)
                 if r:
                     log('%s : %d vente(s), %d expiration(s), %d retrait(s) depuis %d min' % (key, r[0], r[1], r[2], (at - prev_at) // 60))
                 with gzip.open(prev_path, 'wt') as f:
@@ -407,7 +454,12 @@ def run(fetch=fetch_house, tok=None, state_path=None):
             del hc[d]
     # ... et tout ce qui concerne un autre type de serveur
     active = {'%s-%s' % (rs, side): HOUSES[rs][i] for rs in RULESETS for i, side in enumerate(SIDES)}
-    for table in (lows, snaps, sales_all, since, cov):
+    for hp in prof.values():
+        for k in list(hp):
+            hp[k] = {d: v for d, v in hp[k].items() if int(d) > day - KEEP_DAYS}
+            if not hp[k]:
+                del hp[k]
+    for table in (lows, snaps, sales_all, since, cov, prof):
         for k in [k for k in table if k not in active]:
             del table[k]
     os.makedirs(OUT, exist_ok=True)
@@ -424,7 +476,7 @@ def run(fetch=fetch_house, tok=None, state_path=None):
         if houses:
             path = os.path.join(OUT, 'Data-%s.lua' % rs)
             with open(path, 'w') as f:
-                f.write(lua_file(rs, houses, lows, now, sales_all, since, cov))
+                f.write(lua_file(rs, houses, lows, now, sales_all, since, cov, prof))
             log('ecrit %s (%d Ko)' % (path, os.path.getsize(path) // 1024))
     with open(state_path, 'w') as f:
         json.dump(state, f, separators=(',', ':'))

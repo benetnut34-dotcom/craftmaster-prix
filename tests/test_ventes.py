@@ -111,5 +111,23 @@ try:
 finally:
     shutil.rmtree(tmp)
 
+
+# --- profil horaire : l'indice du marche par heure et jour de la semaine (UTC)
+at = 1_800_000_000 + 5 * 86400
+dnow = at // 86400
+lw = {str(i): {str(dnow - k): 1000 for k in (1, 2, 3)} for i in range(1, 301)}
+mi = fetch.market_index({i: (900, 5) for i in range(1, 301)}, lw, at)
+check(mi and abs(mi[0] - 0.9) < 1e-9 and mi[1] == 300, "indice du marche : 900 / habituel 1000 = 0,90 sur 300 objets")
+check(fetch.market_index({i: (900, 5) for i in range(1, 50)}, lw, at) is None, 'trop peu d objets : pas d indice')
+check(fetch.market_index({i: (900, 5) for i in range(1, 301)}, {k: {str(dnow - 1): 1000} for k in lw}, at) is None, 'moins de 3 jours de prix : pas d habituel')
+pf = {}
+for k, v in ((0, 0.90), (7, 0.92), (14, 1.30)):          # meme jour de la semaine et meme heure, 3 semaines
+    fetch.prof_note(pf, v, at - k * 86400)
+check(len(pf) == 1, 'trois semaines au meme creneau : un seul creneau')
+check(fetch.prof_string(pf, dnow).endswith(':3;') or ':2;' in fetch.prof_string(pf, dnow), 'chaine de profil : creneau:indice:nombre')
+fetch.prof_note(pf, 0.5, at)
+ps = fetch.prof_string(pf, dnow)
+check(ps.count(';') == 1 and ps.split(':')[2] == '710', 'la meme heure du meme jour : la derniere ecrase, mediane de deux = moyenne (%s)' % ps)
+
 print('TOUT EST BON' if not fails else '%d ECHEC(S)' % fails)
 raise SystemExit(1 if fails else 0)
