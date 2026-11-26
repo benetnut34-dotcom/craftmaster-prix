@@ -78,10 +78,15 @@ def get(path, tok):
 
 
 TIME_LEFT = {'SHORT': 0, 'MEDIUM': 1, 'LONG': 2, 'VERY_LONG': 3}
+# Ce que veut dire chaque tranche (secondes restantes, bornes de l'API Blizzard) ;
+# une annonce dure au plus 48 h.
+TL_BOUNDS = ((0, 1800), (1800, 7200), (7200, 43200), (43200, 172800))
+MAX_DURATION = 172800
 
 
 def add_auctions(auctions, items, commodity, listings=None):
-    """Prix unitaire le plus bas et quantite totale par objet ; listings[id annonce] = (objet, qte, prix unitaire, duree restante)."""
+    """Prix unitaire le plus bas et quantite totale par objet ;
+    listings[id annonce] = (objet, qte, prix unitaire, duree restante, commodite 0/1)."""
     for a in auctions or ():
         item = a.get('item') or {}
         iid, qty = item.get('id'), a.get('quantity') or 0
@@ -96,7 +101,7 @@ def add_auctions(auctions, items, commodity, listings=None):
             cur[0] = int(unit)
         cur[1] += qty
         if listings is not None and unit > 0 and a.get('id'):
-            listings[str(a['id'])] = (iid, qty, int(unit), TIME_LEFT.get(a.get('time_left'), 3))
+            listings[str(a['id'])] = (iid, qty, int(unit), TIME_LEFT.get(a.get('time_left'), 3), 1 if commodity else 0)
 
 
 def fetch_house(rs, hid, tok):
@@ -112,27 +117,76 @@ def fetch_house(rs, hid, tok):
 
 # ---------------------------------------------------------------------------
 # Ventes : d'une photo a l'autre, chaque annonce garde son numero.
-#   - disparue alors qu'il lui restait plus de 2 h : vendue (ou retiree ;
-#     si des annonces nettement moins cheres restent, plutot retiree : poids 0,25)
-#   - disparue alors qu'il lui restait moins de 2 h : expiree probablement
-#   - meme numero, quantite en baisse : achat partiel (vente sure)
+#
+# Fin de vie : chaque photo dit dans quelle tranche de duree restante est
+# l'annonce (moins de 30 min, 30 min a 2 h, 2 h a 12 h, plus de 12 h). En
+# croisant les photos successives, on resserre la fenetre ou elle expire
+# [lo, hi] (une annonce dure au plus 48 h depuis sa premiere apparition).
+# Une annonce disparue :
+#   - dont la fenetre est passee : expiree ;
+#   - qui ne pouvait pas encore expirer : vendue ou retiree, selon :
+#       * commodite (minerai, herbes, tissu...) : l'achat prend toujours les
+#         moins cheres d'abord ; s'il reste des annonces plus anciennes et
+#         moins cheres, elle n'a pas ete achetee : retiree ;
+#       * objet : l'acheteur choisit ; des annonces moins cheres qui restent
+#         rendent la vente moins probable (poids 0,4 puis 0,15) ;
+#       * une nouvelle annonce du meme objet, de la meme quantite et moins
+#         chere apparait en meme temps : sans doute retiree puis remise en
+#         vente (poids divise par deux) ;
+#   - dont la fenetre chevauche la photo : vendue avec un poids reduit d'autant.
+# Meme numero, quantite en baisse : achat partiel (vente sure).
 # Par objet et par jour : poids des ventes, unites, unites expirees, derniere
 # vente, et les prix (pour les quartiles).
 # ---------------------------------------------------------------------------
 MAX_GAP = 3 * 3600
 MAX_PRICES = 40
+MIN_WEIGHT = 0.05
+
+
+def norm_listing(v, at):
+    """Une annonce gardee : (objet, qte, prix, tranche, commodite, lo, hi, premiere vue).
+    Accepte l'ancien format (objet, qte, prix, tranche)."""
+    v = tuple(v)
+    if len(v) >= 8:
+        return v[:8]
+    iid, qty, unit, tl = v[:4]
+    c = v[4] if len(v) > 4 else 0
+    lo, hi = TL_BOUNDS[tl]
+    return (iid, qty, unit, tl, c, at + lo, at + hi, at)
+
+
+def with_windows(prev, cur, at):
+    """Ajoute a chaque annonce de cur sa fenetre de fin [lo, hi] et sa premiere vue."""
+    out = {}
+    for aid, v in cur.items():
+        iid, qty, unit, tl = v[:4]
+        c = v[4] if len(v) > 4 else 0   # annonce sans drapeau commodite : traitee comme un objet
+        lo, hi = at + TL_BOUNDS[tl][0], at + TL_BOUNDS[tl][1]
+        first = at
+        p = prev.get(aid) if prev else None
+        if p and p[0] == iid:
+            first = p[7]
+            plo, phi = max(lo, p[5]), min(hi, p[6])
+            if plo <= phi:              # sinon les photos se contredisent : on garde la tranche du moment
+                lo, hi = plo, phi
+        hi = max(lo, min(hi, first + MAX_DURATION))
+        out[aid] = (iid, qty, unit, tl, c, lo, hi, first)
+    return out
 
 
 def track_sales(prev, prev_at, cur, cur_at, sales):
-    """Ajoute a sales[objet][jour] les ventes entre deux photos. Renvoie (ventes, expirations)."""
+    """Ajoute a sales[objet][jour] les ventes entre deux photos (annonces au format
+    norm_listing). Renvoie (ventes, expirations, retraits)."""
     if not prev or not prev_at or not (60 < cur_at - prev_at <= MAX_GAP):
         return None
     day = str(cur_at // 86400)
-    cheapest = {}
-    for iid, qty, unit, tl in cur.values():
-        if iid not in cheapest or unit < cheapest[iid]:
-            cheapest[iid] = unit
-    found = expired = 0
+    survivors, fresh = {}, {}         # par objet : prix des annonces restees ; nouvelles annonces
+    for aid, v in cur.items():
+        if aid in prev:
+            survivors.setdefault(v[0], []).append(v[2])
+        else:
+            fresh.setdefault(v[0], []).append([v[1], v[2], False])
+    found = expired = cancelled = 0
 
     def add(iid, unit, qty, w):
         d = sales.setdefault(str(iid), {}).setdefault(day, {'n': 0, 'u': 0, 'x': 0, 'l': 0, 'p': []})
@@ -152,22 +206,62 @@ def track_sales(prev, prev_at, cur, cur_at, sales):
                 d['p'].sort(key=lambda e: e[1])
                 del d['p'][0]
 
-    for aid, (iid, qty, unit, tl) in prev.items():
+    for aid, (iid, qty, unit, tl, c, lo, hi, first) in prev.items():
         now = cur.get(aid)
         if now:
             if now[1] < qty:
                 add(iid, unit, qty - now[1], 1)
                 found += 1
             continue
-        if tl <= 1:
+        # 1) a-t-elle pu expirer avant cette photo ?
+        if hi <= cur_at:
             add(iid, unit, qty, -1)
             expired += 1
-        else:
-            low = cheapest.get(iid)
-            w = 1 if (low is None or unit <= low * 1.05) else 0.25
-            add(iid, unit, qty, w)
-            found += 1
-    return found, expired
+            continue
+        p_exp = 0.0 if lo >= cur_at else (cur_at - lo) / float(hi - lo)
+        if p_exp >= 0.5:
+            add(iid, unit, qty, -1)
+            expired += 1
+            continue
+        w = 1.0 - p_exp
+        # 2) des annonces plus anciennes et moins cheres sont restees
+        cheaper = sum(1 for u in survivors.get(iid, ()) if u < unit * (1.0 if c else 0.95))
+        if c and cheaper:
+            w = 0.0
+        elif cheaper:
+            w *= 0.4 if cheaper <= 2 else 0.15
+        # 3) remise en vente moins cher : nouvelle annonce, meme objet, meme quantite,
+        #    prix plus bas (une coincidence reste possible : poids divise par deux)
+        if w > 0:
+            for f in fresh.get(iid, ()):
+                if not f[2] and f[0] == qty and f[1] < unit:
+                    f[2] = True
+                    w *= 0.5
+                    break
+        if w < MIN_WEIGHT:
+            cancelled += 1
+            continue
+        add(iid, unit, qty, round(w, 2))
+        found += 1
+    return found, expired, cancelled
+
+
+DEPTH_LEVELS = 6
+
+
+def depth_string(listings, wanted):
+    """'id=prix:unites,prix:unites;' : les DEPTH_LEVELS prix les plus bas en vente
+    (unites cumulees par prix), pour les objets de wanted (ceux qui ont des ventes)."""
+    ladders = {}
+    for iid, qty, unit, *_ in listings.values():
+        if str(iid) in wanted and unit > 0:
+            lv = ladders.setdefault(iid, {})
+            lv[unit] = lv.get(unit, 0) + qty
+    out = []
+    for iid in sorted(ladders):
+        lv = sorted(ladders[iid].items())[:DEPTH_LEVELS]
+        out.append('%d=%s;' % (iid, ','.join('%d:%d' % pq for pq in lv)))
+    return ''.join(out)
 
 
 def sales_string(sales, since, now):
@@ -237,6 +331,7 @@ def lua_file(rs, houses, lows, now, sales=None, since=None, cov=None):
         out.append('cov = "%s",' % cov_string((cov or {}).get(key, {}), day))
         out.append('items = "%s",' % snap)
         out.append('lows = "%s",' % ''.join(lw))
+        out.append('depth = "%s",' % h.get('depth', ''))
         out.append('sales = "%s" },' % sales_string((sales or {}).get(key, {}), (since or {}).get(key), now))
     out.append('} }')
     return '\n'.join(out) + '\n'
@@ -273,21 +368,25 @@ def run(fetch=fetch_house, tok=None, state_path=None):
                 try:
                     with gzip.open(prev_path, 'rt') as f:
                         pv = json.load(f)
-                    prev, prev_at = {k: tuple(v) for k, v in pv['l'].items()}, pv['at']
+                    prev_at = pv['at']
+                    prev = {k: norm_listing(v, prev_at) for k, v in pv['l'].items()}
                 except (OSError, ValueError, KeyError):
                     prev = None
+            depth = (snaps.get(key) or {}).get('depth', '')
             if prev_at != at:
                 new += 1
+                cur = with_windows(prev, listings, at)
                 hc = cov.setdefault(key, {})
                 hc[str(at // 86400)] = hc.get(str(at // 86400), 0) + 1
                 hs = sales_all.setdefault(key, {})
-                r = track_sales(prev, prev_at, listings, at, hs)
+                r = track_sales(prev, prev_at, cur, at, hs)
                 since.setdefault(key, at)
                 if r:
-                    log('%s : %d vente(s), %d expiration(s) depuis %d min' % (key, r[0], r[1], (at - prev_at) // 60))
+                    log('%s : %d vente(s), %d expiration(s), %d retrait(s) depuis %d min' % (key, r[0], r[1], r[2], (at - prev_at) // 60))
                 with gzip.open(prev_path, 'wt') as f:
-                    json.dump({'at': at, 'l': listings}, f, separators=(',', ':'))
-            snaps[key] = {'id': hid, 'at': at, 'items': {str(k): v for k, v in items.items()}}
+                    json.dump({'at': at, 'l': cur}, f, separators=(',', ':'))
+                depth = depth_string(listings, hs)
+            snaps[key] = {'id': hid, 'at': at, 'items': {str(k): v for k, v in items.items()}, 'depth': depth}
             d = str(at // 86400)
             hl = lows.setdefault(key, {})
             for iid, (price, _) in items.items():
@@ -320,7 +419,7 @@ def run(fetch=fetch_house, tok=None, state_path=None):
             os.remove(os.path.join(OUT, name))
             log('purge : %s' % name)
     for rs in RULESETS:
-        houses = {k: {'id': s['id'], 'at': s['at'], 'items': {int(i): e for i, e in s['items'].items()}}
+        houses = {k: {'id': s['id'], 'at': s['at'], 'items': {int(i): e for i, e in s['items'].items()}, 'depth': s.get('depth', '')}
                   for k, s in snaps.items() if k.startswith(rs + '-')}
         if houses:
             path = os.path.join(OUT, 'Data-%s.lua' % rs)
