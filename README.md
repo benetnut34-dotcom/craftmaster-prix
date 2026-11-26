@@ -30,7 +30,8 @@ Les numéros d'HV par type de serveur viennent de relevés de la communauté : l
 
 ## Fonctionnement
 
-- `.github/workflows/prix.yml` lance `fetch.py` **3 fois par heure** (minutes 12, 32 et 52) sur les serveurs de GitHub : aucun PC n'a besoin d'être allumé. Trois passages parce que GitHub retarde ou saute parfois les déclenchements planifiés ; Blizzard ne publie qu'une photo par heure (vers la 21e minute), et un passage sans photo nouvelle ne publie rien.
+- `.github/workflows/prix.yml` lance `fetch.py` **toutes les heures à h32** sur les serveurs de GitHub : aucun PC n'a besoin d'être allumé. Le déclencheur planifié de GitHub (`cron`) est « au mieux » et a raté environ 9 passages sur 10 ici : le workflow **se relance lui-même** (job `relais` : attend la prochaine h32 puis relance le workflow ; un relais plus récent annule l'ancien, donc une seule chaîne). Le `cron` (minutes 12, 32 et 52) ne sert plus que de filet de sécurité, et un `push` sur `fetch.py` ou le workflow relance la chaîne. Blizzard ne publie qu'une photo par heure (vers la 21e minute), et un passage sans photo nouvelle ne publie rien.
+- Si la chaîne s'arrête quand même : onglet Actions > Run workflow la relance.
 - Un « keep-alive » en fin de passage empêche GitHub de couper la planification après 60 jours d'inactivité.
 - On peut aussi le lancer à la demande (onglet Actions > Run workflow).
 - Les identifiants de l'API sont des **secrets du dépôt** (`BLIZZARD_CLIENT_ID`, `BLIZZARD_CLIENT_SECRET`). Ils ne sont visibles par personne et n'apparaissent dans aucun fichier.

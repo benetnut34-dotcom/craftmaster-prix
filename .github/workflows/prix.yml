@@ -1,26 +1,34 @@
 name: Prix de l'HV (API Blizzard)
 
 # Tourne sur les serveurs de GitHub : aucun PC n'a besoin d'etre allume.
-# Les declencheurs "schedule" de GitHub sont parfois retardes ou sautes quand la
-# plateforme est chargee : on en met 3 par heure. Blizzard ne publie qu'une photo
-# par heure (vers la 21e minute) ; les passages sans photo nouvelle ne publient rien.
+#
+# Le declencheur "schedule" de GitHub est "au mieux" : sur ce depot il n'a lance
+# qu'un passage sur une trentaine prevus. Le workflow se relance donc LUI-MEME :
+# le job "relais" attend la prochaine h32 puis relance le workflow (un
+# workflow_dispatch lance avec le jeton du workflow est autorise, contrairement
+# aux autres evenements). Le cron ci-dessous ne sert plus que de filet : s'il
+# finit par tourner alors que la chaine est cassee, il la relance.
+# Blizzard ne publie qu'une photo par heure (vers la 21e minute) ; un passage
+# sans photo nouvelle ne publie rien.
 on:
   schedule:
     - cron: '12,32,52 * * * *'
   workflow_dispatch:        # bouton "Run workflow"
+  push:                     # un changement du script ou du workflow relance la chaine
+    branches: [main]
+    paths: ['fetch.py', '.github/workflows/prix.yml']
 
 permissions:
   contents: write
-  actions: write            # pour le keep-alive ci-dessous
-
-concurrency:
-  group: prix
-  cancel-in-progress: false
+  actions: write            # relais + keep-alive
 
 jobs:
   prix:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: prix
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
@@ -68,3 +76,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow enable prix.yml --repo "${{ github.repository }}" || true
+
+  # Attend la prochaine h32 (UTC) puis relance le workflow. Meme si le passage
+  # a echoue (always) : la chaine ne doit jamais s'arreter. Un seul relais vit a
+  # la fois : un relais plus recent (cron, clic manuel) annule l'ancien.
+  relais:
+    needs: prix
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    concurrency:
+      group: relais
+      cancel-in-progress: true
+    steps:
+      - name: Attendre la prochaine h32 puis relancer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          now=$(date +%s)
+          next=$(date -u -d "$(date -u +%Y-%m-%d\ %H):32:00" +%s)
+          if [ "$next" -le "$((now + 600))" ]; then next=$((next + 3600)); fi
+          echo "Prochain passage dans $(( (next - now) / 60 )) min"
+          sleep $((next - now))
+          gh workflow run prix.yml --repo "${{ github.repository }}"
