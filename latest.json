@@ -1,0 +1,8 @@
+{
+  "version": "3.19.0",
+  "zip": "CraftMaster-3.19.0.zip",
+  "sha256": "68ee80dc96e607a2fe41f7b42d6db004b081d6e225b2fdad996fd86b6b4cdc2c",
+  "size": 551436,
+  "companion": 4,
+  "notes": "Le panier revient dans les métiers, les niveaux des recettes en barre colorée, et la mise à jour se pilote depuis le menu."
+}
