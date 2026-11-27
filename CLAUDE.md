@@ -4,7 +4,7 @@ Ce depot collecte, toutes les heures et sans aucun PC allume, les prix de l'hote
 
 ## Ce qui ne doit JAMAIS changer sans que le proprietaire l'ait decide
 Les tests de `tests/test_fetch.py` les protegent (a lancer a la main avant de pousser : `python3 tests/test_fetch.py` et `python3 tests/test_ventes.py`).
-- **Serveur JcJ (PvP) seulement** (`RULESETS`), 3 HV : 110, 113, 116.
+- **Serveur JcJ (PvP) seulement** (`RULESETS`), 2 HV : Horde (113) et commune (116) ; l'HV Alliance (110) n'est volontairement pas collectee.
 - **14 jours** glissants (`KEEP_DAYS`) ; tout ce qui est plus vieux ou d'un autre serveur est purge. L'addon est calibre sur 14 jours.
 - **Le workflow se relance lui-meme** (job `relais`) : le cron de GitHub rate environ 9 passages sur 10. On ne supprime ni `relais`, ni `workflow_dispatch`, ni le `push` sur `fetch.py` / `prix.yml`.
 - **On ne publie que s'il y a une photo nouvelle** (`changed == '1'`), et la branche `data` est remplacee sans historique git (`push --force` vers `data` SEULEMENT, jamais vers `main`).

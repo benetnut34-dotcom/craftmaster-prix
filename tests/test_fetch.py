@@ -35,7 +35,8 @@ class Choices(unittest.TestCase):
         self.assertEqual(fetch.KEEP_DAYS, 14, "l'addon est calibre sur 14 jours (prix habituel, ventes)")
 
     def test_pvp_houses(self):
-        self.assertEqual(fetch.HOUSES['PvP'], (110, 113, 116))
+        self.assertEqual(fetch.HOUSES['PvP'], (113, 116))
+        self.assertEqual(fetch.SIDES, ('Horde', 'Neutral'), "pas d'HV Alliance : le groupe joue Horde")
 
     def test_workflow_keeps_its_guarantees(self):
         wf = read('.github/workflows/prix.yml')
@@ -72,8 +73,9 @@ class Pipeline(unittest.TestCase):
         self.run_once()
         lua = open(os.path.join(self.tmp, 'Data-PvP.lua'), encoding='utf-8').read()
         self.assertTrue(lua.split('\n')[1].startswith('CraftMasterData = { v = 1,'), 'en-tete lu par Import.lua')
-        for key in ('PvP-Alliance', 'PvP-Horde', 'PvP-Neutral'):
+        for key in ('PvP-Horde', 'PvP-Neutral'):
             self.assertIn('["%s"] = { id = ' % key, lua)
+        self.assertNotIn('PvP-Alliance', lua)
         for field in ('items = "', 'lows = "', 'sales = "', 'cov = "', 'keep = 14', 'src = "'):
             self.assertIn(field, lua, 'champ attendu par la page Donnees / Import : ' + field)
         self.assertRegex(lua, r'items = "(\d+:\d+:\d+;)+"', 'format id:prix:quantite;')
@@ -86,19 +88,19 @@ class Pipeline(unittest.TestCase):
         json.dump(state, open(os.path.join(self.tmp, 'state.json'), 'w'))
         self.run_once()
         left = sorted(os.listdir(self.tmp))
-        self.assertEqual(left, ['Data-PvP.lua', 'prev-110.json.gz', 'prev-113.json.gz', 'prev-116.json.gz', 'state.json'])
+        self.assertEqual(left, ['Data-PvP.lua', 'prev-113.json.gz', 'prev-116.json.gz', 'state.json'])
         st = json.load(open(os.path.join(self.tmp, 'state.json')))
         for table in ('lows', 'snap', 'sales', 'since', 'cov'):
             self.assertTrue(all(k.startswith('PvP-') for k in st[table]), table + ' ne garde que le PvP')
 
     def test_coverage_counts_new_pictures_only(self):
         ok, new = self.run_once()
-        self.assertEqual((ok, new), (3, 3))
+        self.assertEqual((ok, new), (2, 2))
         self.run_once()
         st = json.load(open(os.path.join(self.tmp, 'state.json')))
         day = str(self.t0 // 86400)
         total = sum(sum(v.values()) for v in st['cov'].values())
-        self.assertEqual(total, 6, 'deux photos par HV, comptees une fois chacune')
+        self.assertEqual(total, 4, 'deux photos par HV, comptees une fois chacune')
         # the same picture again: nothing new, nothing to publish
         self.calls -= 1
         ok, new = self.run_once()

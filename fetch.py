@@ -31,18 +31,19 @@ KEEP_DAYS = int(os.environ.get('KEEP_DAYS', '14'))
 SOURCE = 'github:' + os.environ.get('GITHUB_REPOSITORY', 'craftmaster-prix') + '@data'
 RUN_ID = os.environ.get('GITHUB_RUN_ID', 'local')
 
-# Les trois hotels (Alliance, Horde, commune) de chaque type de serveur.
-# L'API ne dit pas a quel type appartient un hotel : correspondance relevee par
-# la communaute (110/113/116 = JcJ, 111/114/117 = JcE...). CraftMaster la
-# verifie en jeu contre les scans du joueur.
+# Les deux hotels suivis de chaque type de serveur : Horde et commune. L'HV Alliance
+# (110 en JcJ) n'est volontairement PAS collectee : le groupe joue Horde, et la
+# commune ne sert qu'a la comparaison des HV. L'API ne dit pas a quel type appartient
+# un hotel : correspondance relevee par la communaute (110/113/116 = JcJ, 111/114/117 =
+# JcE...). CraftMaster la verifie en jeu contre les scans du joueur.
 HOUSES = {
-    'PvP': (110, 113, 116),
-    'PvE': (111, 114, 117),
-    'RP': (119, 120, 121),
-    'RPvP': (123, 124, 125),
+    'PvP': (113, 116),
+    'PvE': (114, 117),
+    'RP': (120, 121),
+    'RPvP': (124, 125),
 }
 RULESET_IDS = {'PvP': 1, 'PvE': 2, 'RP': 3, 'RPvP': 15}
-SIDES = ('Alliance', 'Horde', 'Neutral')
+SIDES = ('Horde', 'Neutral')
 
 
 def log(msg):

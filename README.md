@@ -16,9 +16,9 @@ Le compagnon recopie le fichier de ton type de serveur toutes les heures. Fais `
 
 | Fichier | Contenu |
 |---|---|
-| `Data-PvP.lua` | JcJ : HV Alliance (110), Horde (113), commune (116) — **seul type de serveur suivi** |
+| `Data-PvP.lua` | JcJ : HV Horde (113) et commune (116) — **seul type de serveur suivi** ; pas d'HV Alliance |
 | `state.json` | L'historique glissant (prix bas par jour, ventes, couverture), repris à chaque passage |
-| `prev-110/113/116.json.gz` | Dernière photo complète des annonces, pour détecter les ventes |
+| `prev-113/116.json.gz` | Dernière photo complète des annonces, pour détecter les ventes |
 
 Les autres types de serveur (JcE, JdR, JdR-JcJ) ne sont plus collectés et leurs données ont été purgées. Pour en rajouter un : variable `RULESETS` du workflow.
 
