@@ -32,10 +32,11 @@ def day(sales, iid):
 
 
 # --- fenetre de fin : resserree par les photos successives
-p1 = snap(None, {'a': (1, 1, 100, 3, 0)}, T0)                   # plus de 12 h
-check(p1['a'][5] == T0 + 12 * H and p1['a'][6] == T0 + 48 * H, 'premiere photo : fin entre 12 h et 48 h')
-p2 = snap(p1, {'a': (1, 1, 100, 2, 0)}, T0 + H)                  # passee sous 12 h
-check(p2['a'][5] == T0 + 12 * H and p2['a'][6] == T0 + 13 * H, 'passage a LONG : fin entre 12 h et 13 h (%s)' % ((p2['a'][5] - T0) / H, ))
+p1 = snap(None, {'a': (1, 1, 100, 3, 0)}, T0)                   # 8 h a 24 h
+check(p1['a'][5] == T0 + 8 * H and p1['a'][6] == T0 + 24 * H, 'premiere photo : fin entre 8 h et 24 h')
+p2 = snap(p1, {'a': (1, 1, 100, 2, 0)}, T0 + H)                  # passee sous 8 h
+check(p2['a'][5] == T0 + 8 * H and p2['a'][6] == T0 + 9 * H, 'passage a LONG : fin entre 8 h et 9 h (%s)' % ((p2['a'][5] - T0) / H, ))
+check(fetch.MAX_DURATION == 24 * H and fetch.TL_BOUNDS[3] == (8 * H, 24 * H), 'ventes de 2, 8 et 24 h (Forever = Classic) : 24 h au plus')
 check(fetch.norm_listing((1, 1, 100, 1), T0)[5:] == (T0 + 1800, T0 + 7200, T0), 'ancien format de photo accepte')
 
 # --- expiration ou vente selon la fenetre
@@ -43,7 +44,7 @@ s = {}
 prev = snap(None, {'x': (1, 1, 100, 0, 0), 'y': (2, 1, 100, 2, 0), 'z': (3, 1, 100, 1, 0)}, T0)
 r = fetch.track_sales(prev, T0, snap(prev, {}, T0 + H), T0 + H, s)
 check(day(s, 1)['x'] == 1 and day(s, 1)['n'] == 0, 'moins de 30 min restantes, disparue : expiree')
-check(day(s, 2)['n'] == 1, '2 a 12 h restantes, disparue : vendue')
+check(day(s, 2)['n'] == 1, '2 a 8 h restantes, disparue : vendue')
 check(0 < day(s, 3)['n'] < 1, '30 min a 2 h, photo 1 h apres : vente au poids reduit (%s)' % day(s, 3)['n'])
 
 # --- commodites : l'achat prend les moins cheres d'abord

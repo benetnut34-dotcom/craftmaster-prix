@@ -78,10 +78,11 @@ def get(path, tok):
 
 
 TIME_LEFT = {'SHORT': 0, 'MEDIUM': 1, 'LONG': 2, 'VERY_LONG': 3}
-# Ce que veut dire chaque tranche (secondes restantes, bornes de l'API Blizzard) ;
-# une annonce dure au plus 48 h.
-TL_BOUNDS = ((0, 1800), (1800, 7200), (7200, 43200), (43200, 172800))
-MAX_DURATION = 172800
+# Ce que veut dire chaque tranche (secondes restantes, bornes Classic) : WoW Forever
+# propose des ventes de 2, 8 et 24 h comme Classic (vu en jeu le 2026-11-26), et non
+# 12 / 24 / 48 h comme Retail ; une annonce dure donc au plus 24 h.
+TL_BOUNDS = ((0, 1800), (1800, 7200), (7200, 28800), (28800, 86400))
+MAX_DURATION = 86400
 
 
 def add_auctions(auctions, items, commodity, listings=None):
@@ -119,9 +120,9 @@ def fetch_house(rs, hid, tok):
 # Ventes : d'une photo a l'autre, chaque annonce garde son numero.
 #
 # Fin de vie : chaque photo dit dans quelle tranche de duree restante est
-# l'annonce (moins de 30 min, 30 min a 2 h, 2 h a 12 h, plus de 12 h). En
+# l'annonce (moins de 30 min, 30 min a 2 h, 2 h a 8 h, 8 h a 24 h). En
 # croisant les photos successives, on resserre la fenetre ou elle expire
-# [lo, hi] (une annonce dure au plus 48 h depuis sa premiere apparition).
+# [lo, hi] (ventes de 2, 8 ou 24 h : une annonce dure au plus 24 h depuis sa premiere apparition).
 # Une annonce disparue :
 #   - dont la fenetre est passee : expiree ;
 #   - qui ne pouvait pas encore expirer : vendue ou retiree, selon :
